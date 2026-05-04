@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>発注ミニアプリ</title>
+
+  <!-- LIFF SDK -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            line: { DEFAULT: '#06C755', dark: '#05a948', soft: '#e6f9ee' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    html, body { background: #f7f8fa; }
+    .btn-primary { background: #06C755; color: #fff; }
+    .btn-primary:hover { background: #05a948; }
+    .btn-primary:disabled { background: #b6e6c4; cursor: not-allowed; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .item-row { background: #fafbfc; }
+    select, input[type="number"] {
+      -webkit-appearance: none; appearance: none;
+    }
+    .scroll-x { -webkit-overflow-scrolling: touch; }
+  </style>
+</head>
+<body class="min-h-screen text-gray-800">
+
+  <!-- ヘッダー -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
+    <div class="max-w-md mx-auto px-4 py-3 flex items-center gap-2">
+      <div class="w-8 h-8 rounded-full bg-line text-white flex items-center justify-center font-bold">発</div>
+      <div>
+        <div class="text-sm font-semibold leading-tight">発注ミニアプリ</div>
+        <div class="text-[11px] text-gray-500" id="header-subtitle">読み込み中...</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto px-4 py-4 pb-32">
+
+    <!-- ローディング画面 -->
+    <section id="screen-loading" class="card p-6 text-center">
+      <div class="inline-block w-8 h-8 border-4 border-line border-t-transparent rounded-full animate-spin mb-3"></div>
+      <div class="text-sm text-gray-600">起動中です...</div>
+    </section>
+
+    <!-- 認証エラー画面 -->
+    <section id="screen-error" class="hidden card p-6 text-center">
+      <div class="text-4xl mb-3">⚠️</div>
+      <h2 class="text-lg font-semibold mb-2">ご利用いただけません</h2>
+      <p class="text-sm text-gray-600 mb-4" id="error-message">担当者にお問い合わせください。</p>
+      <button id="btn-retry" class="px-4 py-2 rounded-lg border border-gray-300 text-sm">再読み込み</button>
+    </section>
+
+    <!-- 発注フォーム画面 -->
+    <section id="screen-form" class="hidden">
+      <div class="card p-4 mb-3">
+        <div class="text-xs text-gray-500">お客様</div>
+        <div class="text-base font-semibold" id="customer-name">-</div>
+      </div>
+
+      <div class="card p-4 mb-3">
+        <label for="desired-date" class="block">
+          <div class="flex items-baseline justify-between mb-1">
+            <span class="text-sm font-semibold text-gray-700">希望納期</span>
+            <span class="text-[11px] text-red-500">必須</span>
+          </div>
+          <input id="desired-date" type="date"
+            class="w-full p-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-line">
+          <p id="desired-date-error" class="text-xs text-red-500 mt-1 hidden"></p>
+        </label>
+      </div>
+
+      <div id="items-container" class="space-y-3"></div>
+
+      <button id="btn-add-item"
+        class="mt-3 w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-sm text-gray-600 hover:border-line hover:text-line">
+        ＋ 商品を追加
+      </button>
+
+      <div class="card p-4 mt-4">
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-600">合計</span>
+          <span class="text-xl font-bold text-line" id="total-amount">¥0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 確認画面 -->
+    <section id="screen-confirm" class="hidden">
+      <div class="card p-4 mb-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <div class="text-xs text-gray-500 mb-1">お客様</div>
+            <div class="text-base font-semibold" id="confirm-customer">-</div>
+          </div>
+          <div>
+            <div class="text-xs text-gray-500 mb-1">希望納期</div>
+            <div class="text-base font-semibold" id="confirm-desired-date">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="card p-4">
+        <h3 class="text-sm font-semibold mb-3">発注内容のご確認</h3>
+        <div id="confirm-items" class="divide-y divide-gray-100"></div>
+        <div class="border-t border-gray-200 mt-3 pt-3 flex justify-between items-baseline">
+          <span class="text-sm text-gray-600">合計金額</span>
+          <span class="text-2xl font-bold text-line" id="confirm-total">¥0</span>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mt-3 leading-relaxed">
+        ※ この時点では仮発注です。担当者の確認後に受注確定のご連絡をいたします。
+      </p>
+    </section>
+
+    <!-- 完了画面 -->
+    <section id="screen-complete" class="hidden card p-6 text-center">
+      <div class="w-16 h-16 mx-auto rounded-full bg-line-soft text-line flex items-center justify-center text-3xl mb-3">✓</div>
+      <h2 class="text-lg font-semibold mb-1">仮発注を受け付けました</h2>
+      <p class="text-sm text-gray-600 mb-1">発注ID： <span id="complete-order-id" class="font-mono">-</span></p>
+      <p class="text-xs text-gray-500 mb-5">確認メールをお送りしました。受注確定後に改めてご連絡いたします。</p>
+      <button id="btn-new-order" class="px-5 py-3 rounded-xl btn-primary text-sm font-semibold w-full">
+        新しい発注を開始する
+      </button>
+    </section>
+
+  </main>
+
+  <!-- フッター固定アクションバー -->
+  <div id="footer-bar" class="hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 px-4 py-3 z-20">
+    <div class="max-w-md mx-auto flex gap-2">
+      <button id="btn-back" class="hidden flex-1 py-3 rounded-xl border border-gray-300 text-sm font-semibold">
+        戻る
+      </button>
+      <button id="btn-next" class="flex-1 py-3 rounded-xl btn-primary text-sm font-semibold">
+        確認画面へ進む
+      </button>
+    </div>
+  </div>
+
+  <!-- 商品行テンプレート -->
+  <template id="tpl-item-row">
+    <div class="card p-3 item-row">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs text-gray-500" data-role="row-no">商品 1</span>
+        <button data-role="btn-remove" class="text-xs text-gray-400 hover:text-red-500">削除</button>
+      </div>
+      <select data-role="product-select"
+        class="w-full p-2 rounded-lg border border-gray-300 bg-white text-sm focus:outline-none focus:border-line">
+        <option value="">商品を選択...</option>
+      </select>
+      <div class="grid grid-cols-3 gap-2 mt-2 items-end">
+        <div class="col-span-1">
+          <label class="text-[11px] text-gray-500">数量</label>
+          <input data-role="qty" type="number" min="1" step="1" value="1"
+            class="w-full p-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-line">
+        </div>
+        <div class="col-span-2 text-right">
+          <div class="text-[11px] text-gray-500">在庫 / 単価 / 小計</div>
+          <div class="text-sm">
+            <span class="text-gray-500">在庫</span> <span data-role="stock">-</span>
+            <span class="text-gray-500">¥</span><span data-role="unit-price">-</span>
+          </div>
+          <div class="text-sm font-semibold">小計 ¥<span data-role="subtotal">0</span></div>
+        </div>
+      </div>
+      <p data-role="row-error" class="text-xs text-red-500 mt-1 hidden"></p>
+    </div>
+  </template>
+
+<script>
+/* ============================================================
+ * 設定（デプロイ時に書き換え）
+ * ============================================================ */
+const LIFF_ID = 'YOUR_LIFF_ID';                       // LINE Developersで取得
+const GAS_URL = 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'; // GASデプロイURL
+
+/* ============================================================
+ * 状態
+ * ============================================================ */
+const state = {
+  customer: null,    // { customerId, customerName, ... }
+  products: [],      // [ { productId, productName, unitPrice, stock } ... ]
+  items: [],         // [ { uid, productId, quantity } ... ]
+  desiredDate: '',   // YYYY-MM-DD
+  lastOrderId: null
+};
+let uidSeq = 0;
+
+/* 日付ユーティリティ */
+function todayStr() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function formatDateJa(yyyymmdd) {
+  if (!yyyymmdd) return '';
+  const [y, m, d] = yyyymmdd.split('-');
+  return `${y}年${Number(m)}月${Number(d)}日`;
+}
+
+/* ============================================================
+ * 起動
+ * ============================================================ */
+window.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+  try {
+    // LIFF未設定でも開発確認できるように分岐
+    let lineDisplayName = '';
+    if (LIFF_ID && LIFF_ID !== 'YOUR_LIFF_ID') {
+      await liff.init({ liffId: LIFF_ID });
+      if (!liff.isLoggedIn()) { liff.login(); return; }
+      const profile = await liff.getProfile();
+      lineDisplayName = (profile.displayName || '').trim();
+      if (!lineDisplayName) {
+        showError('LINEプロフィールから氏名を取得できませんでした。LINEプロフィールに氏名を設定してください。');
+        return;
+      }
+    } else {
+      // 開発モード： URLパラメータ ?n=表示名 で代用
+      const params = new URLSearchParams(location.search);
+      lineDisplayName = (params.get('n') || '').trim();
+      if (!lineDisplayName) {
+        showError('LIFF未設定です（開発時は ?n=表示名 をURLに付与してください）。');
+        return;
+      }
+    }
+
+    // 認証
+    const authRes = await api('auth', { lineDisplayName });
+    state.customer = authRes;
+    document.getElementById('header-subtitle').textContent = state.customer.customerName + ' 様';
+    document.getElementById('customer-name').textContent = state.customer.customerName + ' 様';
+
+    // 商品取得
+    const products = await api('getProducts', { customerId: state.customer.customerId });
+    if (!products.length) {
+      showError('発注可能な商品が登録されていません。担当者にお問い合わせください。');
+      return;
+    }
+    state.products = products;
+
+    // 希望納期の初期値（最短=本日 / デフォルト=未入力）
+    const dateInput = document.getElementById('desired-date');
+    dateInput.min = todayStr();
+    dateInput.addEventListener('change', () => {
+      state.desiredDate = dateInput.value;
+      document.getElementById('desired-date-error').classList.add('hidden');
+    });
+
+    // 初期1行追加して、フォーム表示
+    addItemRow();
+    showScreen('form');
+
+  } catch (err) {
+    showError(err.message || String(err));
+  }
+}
+
+/* ============================================================
+ * API呼び出し（GAS Web App）
+ * ============================================================ */
+async function api(action, payload) {
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    // GAS Web App のCORS制約を避けるため text/plain で送信
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action, ...payload })
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || 'サーバーエラー');
+  return json.data;
+}
+
+/* ============================================================
+ * 画面切替
+ * ============================================================ */
+function showScreen(name) {
+  ['loading', 'error', 'form', 'confirm', 'complete'].forEach(s => {
+    document.getElementById('screen-' + s).classList.add('hidden');
+  });
+  document.getElementById('screen-' + name).classList.remove('hidden');
+
+  const footer = document.getElementById('footer-bar');
+  const btnNext = document.getElementById('btn-next');
+  const btnBack = document.getElementById('btn-back');
+
+  if (name === 'form') {
+    footer.classList.remove('hidden');
+    btnBack.classList.add('hidden');
+    btnNext.textContent = '確認画面へ進む';
+    btnNext.onclick = goConfirm;
+  } else if (name === 'confirm') {
+    footer.classList.remove('hidden');
+    btnBack.classList.remove('hidden');
+    btnBack.onclick = () => showScreen('form');
+    btnNext.textContent = 'この内容で発注する';
+    btnNext.onclick = submitOrder;
+  } else {
+    footer.classList.add('hidden');
+  }
+}
+
+function showError(msg) {
+  document.getElementById('error-message').textContent = msg;
+  showScreen('error');
+}
+
+document.getElementById('btn-retry').onclick = () => location.reload();
+document.getElementById('btn-add-item').onclick = () => addItemRow();
+document.getElementById('btn-new-order').onclick = () => {
+  state.items = [];
+  state.desiredDate = '';
+  document.getElementById('items-container').innerHTML = '';
+  const dateInput = document.getElementById('desired-date');
+  dateInput.value = '';
+  document.getElementById('desired-date-error').classList.add('hidden');
+  addItemRow();
+  showScreen('form');
+};
+
+/* ============================================================
+ * 商品行の追加・削除・更新
+ * ============================================================ */
+function addItemRow() {
+  if (state.items.length >= 20) {
+    alert('1回の発注で追加できるのは最大20品目までです');
+    return;
+  }
+  const uid = ++uidSeq;
+  state.items.push({ uid, productId: '', quantity: 1 });
+
+  const tpl = document.getElementById('tpl-item-row');
+  const node = tpl.content.firstElementChild.cloneNode(true);
+  node.dataset.uid = uid;
+
+  // 商品セレクト構築
+  const sel = node.querySelector('[data-role="product-select"]');
+  state.products.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.productId;
+    opt.textContent = p.productName + '（在庫' + p.stock + '）';
+    if (p.stock <= 0) { opt.disabled = true; opt.textContent += ' [在庫切れ]'; }
+    sel.appendChild(opt);
+  });
+
+  sel.addEventListener('change', () => onRowChange(uid));
+  node.querySelector('[data-role="qty"]').addEventListener('input', () => onRowChange(uid));
+  node.querySelector('[data-role="btn-remove"]').addEventListener('click', () => removeRow(uid));
+
+  document.getElementById('items-container').appendChild(node);
+  refreshRowNumbers();
+  refreshTotal();
+}
+
+function removeRow(uid) {
+  state.items = state.items.filter(i => i.uid !== uid);
+  const node = document.querySelector('[data-uid="' + uid + '"]');
+  if (node) node.remove();
+  if (state.items.length === 0) addItemRow();
+  refreshRowNumbers();
+  refreshTotal();
+}
+
+function refreshRowNumbers() {
+  const nodes = document.querySelectorAll('#items-container .item-row');
+  nodes.forEach((n, idx) => {
+    n.querySelector('[data-role="row-no"]').textContent = '商品 ' + (idx + 1);
+  });
+}
+
+function onRowChange(uid) {
+  const item = state.items.find(i => i.uid === uid);
+  const node = document.querySelector('[data-uid="' + uid + '"]');
+  if (!item || !node) return;
+
+  const sel = node.querySelector('[data-role="product-select"]');
+  const qtyInput = node.querySelector('[data-role="qty"]');
+  const stockEl = node.querySelector('[data-role="stock"]');
+  const unitPriceEl = node.querySelector('[data-role="unit-price"]');
+  const subtotalEl = node.querySelector('[data-role="subtotal"]');
+  const errEl = node.querySelector('[data-role="row-error"]');
+  errEl.classList.add('hidden');
+
+  item.productId = sel.value;
+  const product = state.products.find(p => p.productId === item.productId);
+
+  if (!product) {
+    stockEl.textContent = '-';
+    unitPriceEl.textContent = '-';
+    subtotalEl.textContent = '0';
+    item.quantity = 1;
+    qtyInput.value = 1;
+    qtyInput.removeAttribute('max');
+    refreshTotal();
+    return;
+  }
+
+  // 数量制約
+  qtyInput.max = product.stock;
+  let qty = parseInt(qtyInput.value, 10);
+  if (!qty || qty < 1) qty = 1;
+  if (qty > product.stock) {
+    qty = product.stock;
+    errEl.textContent = '在庫数（' + product.stock + '）が上限です';
+    errEl.classList.remove('hidden');
+  }
+  qtyInput.value = qty;
+  item.quantity = qty;
+
+  stockEl.textContent = product.stock;
+  unitPriceEl.textContent = product.unitPrice.toLocaleString();
+  subtotalEl.textContent = (product.unitPrice * qty).toLocaleString();
+
+  refreshTotal();
+}
+
+function refreshTotal() {
+  let total = 0;
+  state.items.forEach(it => {
+    const p = state.products.find(x => x.productId === it.productId);
+    if (p) total += p.unitPrice * (Number(it.quantity) || 0);
+  });
+  document.getElementById('total-amount').textContent = '¥' + total.toLocaleString();
+}
+
+/* ============================================================
+ * 確認画面・送信
+ * ============================================================ */
+function goConfirm() {
+  // 希望納期チェック
+  const dateInput = document.getElementById('desired-date');
+  const errEl = document.getElementById('desired-date-error');
+  errEl.classList.add('hidden');
+  state.desiredDate = dateInput.value;
+  if (!state.desiredDate) {
+    errEl.textContent = '希望納期を入力してください';
+    errEl.classList.remove('hidden');
+    dateInput.focus();
+    return;
+  }
+  if (state.desiredDate < todayStr()) {
+    errEl.textContent = '希望納期は本日以降の日付を指定してください';
+    errEl.classList.remove('hidden');
+    dateInput.focus();
+    return;
+  }
+
+  // バリデーション
+  const valid = state.items.filter(i => i.productId && i.quantity > 0);
+  if (valid.length === 0) {
+    alert('商品を1つ以上選択してください');
+    return;
+  }
+  // 同一商品の重複は許容（合計しない）
+  // 在庫超過チェック
+  for (const it of valid) {
+    const p = state.products.find(x => x.productId === it.productId);
+    if (!p) { alert('商品が選択されていません'); return; }
+    if (it.quantity > p.stock) {
+      alert(p.productName + ' は在庫数を超えています');
+      return;
+    }
+  }
+
+  // 確認画面構築
+  document.getElementById('confirm-customer').textContent = state.customer.customerName + ' 様';
+  document.getElementById('confirm-desired-date').textContent = formatDateJa(state.desiredDate);
+  const list = document.getElementById('confirm-items');
+  list.innerHTML = '';
+  let total = 0;
+  valid.forEach(it => {
+    const p = state.products.find(x => x.productId === it.productId);
+    const sub = p.unitPrice * it.quantity;
+    total += sub;
+    const row = document.createElement('div');
+    row.className = 'py-2 flex justify-between text-sm';
+    row.innerHTML =
+      '<div><div class="font-medium">' + escapeHtml(p.productName) + '</div>' +
+      '<div class="text-xs text-gray-500">¥' + p.unitPrice.toLocaleString() + ' × ' + it.quantity + '</div></div>' +
+      '<div class="font-semibold">¥' + sub.toLocaleString() + '</div>';
+    list.appendChild(row);
+  });
+  document.getElementById('confirm-total').textContent = '¥' + total.toLocaleString();
+
+  showScreen('confirm');
+}
+
+async function submitOrder() {
+  const btn = document.getElementById('btn-next');
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+  try {
+    const items = state.items
+      .filter(i => i.productId && i.quantity > 0)
+      .map(i => ({ productId: i.productId, quantity: Number(i.quantity) }));
+
+    const res = await api('createOrder', {
+      customerId: state.customer.customerId,
+      desiredDeliveryDate: state.desiredDate,
+      items
+    });
+    state.lastOrderId = res.orderId;
+    document.getElementById('complete-order-id').textContent = res.orderId;
+    showScreen('complete');
+  } catch (err) {
+    alert('発注に失敗しました：\n' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ============================================================
+ * util
+ * ============================================================ */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+</script>
+</body>
+</html>
